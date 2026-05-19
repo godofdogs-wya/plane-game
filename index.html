@@ -157,10 +157,11 @@
 
     <div id="team-screen" class="overlay" style="display:none;">
         <div style="margin: auto 0; display: flex; flex-direction: column; align-items: center; width: 100%;">
-            <h1 class="text-5xl font-bold mb-10 text-white text-center">Select Your Team</h1>
+            <h1 class="text-5xl font-bold mb-4 text-white text-center">Select Your Team</h1>
+            <p id="team-balance-error" class="text-xl text-red-500 font-bold mb-6 text-center h-8"></p>
             <div class="flex gap-8 flex-wrap justify-center">
-                <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-5 px-12 rounded-lg text-2xl border-4 border-blue-400" onclick="showVehicleScreen('blue')">BLUE TEAM</button>
-                <button class="bg-red-600 hover:bg-red-500 text-white font-bold py-5 px-12 rounded-lg text-2xl border-4 border-red-400" onclick="showVehicleScreen('red')">RED TEAM</button>
+                <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-5 px-12 rounded-lg text-2xl border-4 border-blue-400" onclick="trySelectTeam('blue')">BLUE TEAM</button>
+                <button class="bg-red-600 hover:bg-red-500 text-white font-bold py-5 px-12 rounded-lg text-2xl border-4 border-red-400" onclick="trySelectTeam('red')">RED TEAM</button>
             </div>
             <button class="mt-10 text-gray-400 hover:text-white text-xl underline" onclick="returnToGarage()">Back to Garage</button>
         </div>
@@ -209,6 +210,7 @@
     <div id="hud" style="display:none;">
         <div class="hud-line score-line">PTS: <span id="pts-val">0</span></div>
         <div class="hud-line alert-line" id="bomber-alert">BOMBER APPROACHING!</div>
+        <div class="hud-line alert-line" id="missile-warning">MISSILE LOCK!</div>
         <div class="hud-line">
             HP: <div class="bar-container" style="border-color: #f00;"><div class="bar-fill" id="hp-bar" style="background: #f00;"></div></div>
         </div>
@@ -265,6 +267,12 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // --- GITHUB MULTIPLAYER HELPER ---
+        // Placing getAppId at the absolute top of module script to prevent ReferenceErrors during setup
+        function getAppId() {
+            return (typeof window !== 'undefined' && window.__app_id) ? window.__app_id : 'github_fjs_room';
+        }
+
         // --- Game Variables ---
         let scene, camera, renderer, terrain;
         let jetGroup = new THREE.Group(); 
@@ -317,7 +325,7 @@
         let targetThrottle = 0;
         let currentThrottle = 0;
         let speed = 0;
-        let maxSpeedBase = 7.5; 
+        let maxSpeedBase = 9.0; 
         
         let crashed = false;
         let altitude = 0;
@@ -390,7 +398,7 @@
         window.adminAction = (actionType) => {
             const targetUsername = document.getElementById('admin-player-input').value.trim();
             if (!targetUsername || !db) return;
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const appId = getAppId();
             const actionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'admin_actions');
             addDoc(actionsRef, { targetUsername, actionType, amount: 1000, timestamp: Date.now() }).catch(e => console.warn(e));
         };
@@ -411,6 +419,38 @@
             isMultiplayer = true;
             document.getElementById('mode-screen').style.display = 'none';
             document.getElementById('team-screen').style.display = 'flex';
+            document.getElementById('team-balance-error').innerText = "";
+        };
+
+        // Strict Team Balance check (Max difference of 1)
+        window.trySelectTeam = (selectedTeam) => {
+            if (!isMultiplayer || !db) {
+                // Offline fallback
+                showVehicleScreen(selectedTeam);
+                return;
+            }
+
+            let blueCount = 0;
+            let redCount = 0;
+
+            // Count teammates on remote players
+            for (let id in remotePlayers) {
+                if (remotePlayers[id].team === 'blue') blueCount++;
+                if (remotePlayers[id].team === 'red') redCount++;
+            }
+
+            // Perform dynamic validation
+            if (selectedTeam === 'blue' && blueCount > redCount) {
+                document.getElementById('team-balance-error').innerText = "Teams must remain balanced! Join Red Team.";
+                return;
+            } else if (selectedTeam === 'red' && redCount > blueCount) {
+                document.getElementById('team-balance-error').innerText = "Teams must remain balanced! Join Blue Team.";
+                return;
+            }
+
+            // Pass validation
+            document.getElementById('team-balance-error').innerText = "";
+            showVehicleScreen(selectedTeam);
         };
 
         window.showVehicleScreen = (team) => {
@@ -434,11 +474,11 @@
                 document.getElementById('mobile-controls').style.display = 'flex';
             }
 
-            if (playerRole === 'bomber_pilot') maxSpeedBase = 4.5;
+            if (playerRole === 'bomber_pilot') maxSpeedBase = 5.5;
             else if (playerRole === 'plane') {
-                if (currentTier === 1) maxSpeedBase = 7.5;
-                else if (currentTier === 2) maxSpeedBase = 9.0;
-                else if (currentTier === 3) maxSpeedBase = 13.0;
+                if (currentTier === 1) maxSpeedBase = 9.0;
+                else if (currentTier === 2) maxSpeedBase = 11.0;
+                else if (currentTier === 3) maxSpeedBase = 15.0;
                 else if (currentTier === 4) maxSpeedBase = 35.0; 
                 else if (currentTier === 5) maxSpeedBase = 12.0; 
             }
@@ -545,7 +585,7 @@
             jetGroup.visible = true; 
             
             // Set initial camera instantly so it doesn't swoop from miles away
-            let relativeCameraOffset = playerRole === 'bomber_pilot' ? new THREE.Vector3(0, 60, 180) : new THREE.Vector3(0, 18, 60);
+            let relativeCameraOffset = playerRole === 'bomber_pilot' ? new THREE.Vector3(0, 60, 180) : new THREE.Vector3(0, 18, 50);
             let initLookOffset = new THREE.Vector3(0, 0, -50);
             
             if (firstPerson) {
@@ -794,7 +834,8 @@
             const darkMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
             const createGearStrut = (height) => {
                 const g = new THREE.Group();
-                const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, height), darkMat); strut.position.y = -(height/2); g.add(strut);
+                const geometry = new THREE.CylinderGeometry(0.2, 0.2, height);
+                const strut = new THREE.Mesh(geometry, darkMat); strut.position.y = -(height/2); g.add(strut);
                 const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0x111111 }));
                 wheel.rotation.z = Math.PI / 2; wheel.position.y = -height; g.add(wheel); return g;
             };
@@ -883,7 +924,7 @@
                 const leaves2 = new THREE.Mesh(new THREE.ConeGeometry(12, 30, 8), leavesMat); leaves2.position.y = 44;
                 tree.add(trunk, leaves1, leaves2);
                 
-                tree.position.set(tx, elev, tz); 
+                tree.position.set(tx, elev - 10, tz); 
                 tree.scale.setScalar(Math.random() * 1.5 + 0.8); scene.add(tree);
             }
 
@@ -980,7 +1021,7 @@
                 document.getElementById('bomb-status').style.color = '#777';
                 
                 if (isMultiplayer && db) {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const appId = getAppId();
                     addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'game_events'), {
                         type: 'bomb', team: playerTeam, sender: userId,
                         x: jetGroup.position.x, y: jetGroup.position.y, z: jetGroup.position.z,
@@ -992,6 +1033,7 @@
                 return;
             }
 
+            const isAdmin = (currentTier === 4 || currentTier === 5);
             const isAdminGunner = playerRole === 'plane' && currentTier === 5;
             const cooldown = isAdminGunner ? 10 : 100;
             const bulletSpeed = isAdminGunner ? 250 : 40; 
@@ -1068,6 +1110,17 @@
 
         // --- AI Bots & Multiplayer Bomber ---
         function spawnBot() {
+            // Remove fighter bots completely if at least two players are in the game
+            const playerCount = Object.keys(remotePlayers).length + 1;
+            if (playerCount >= 2) {
+                // Clear any leftover bots
+                for (let i = bots.length - 1; i >= 0; i--) {
+                    scene.remove(bots[i].mesh);
+                }
+                bots = [];
+                return;
+            }
+
             if (bots.length >= 15) return;
             const botTeam = Math.random() > 0.5 ? 'blue' : 'red';
             const botMesh = buildJetMesh(Math.random() > 0.5 ? 1 : 2, botTeam, botTeam==='blue'?'#ffffff':'#000000'); 
@@ -1109,7 +1162,21 @@
         }
 
         function updateProjectilesAndBots() {
-            if(isMultiplayer && bots.length < 15 && Math.random() < 0.1) spawnBot(); 
+            const playerCount = Object.keys(remotePlayers).length + 1;
+            
+            // Clean out regular bots if 2 or more players are active
+            if (playerCount >= 2 && bots.length > 0) {
+                for (let i = bots.length - 1; i >= 0; i--) {
+                    scene.remove(bots[i].mesh);
+                }
+                bots = [];
+            }
+
+            // Only spawn regular bots in singleplayer or solitary multiplayer
+            if (playerCount < 2 && isMultiplayer && bots.length < 15 && Math.random() < 0.1) {
+                spawnBot(); 
+            }
+
             const now = Date.now();
             const playerPos = jetGroup.position.clone();
 
@@ -1129,6 +1196,7 @@
                 }
             }
 
+            // Bombers spawn independently of the regular fighter bots
             if (isMultiplayer) {
                 ['red', 'blue'].forEach(team => {
                     let playerBomberExists = Object.values(remotePlayers).some(p => p.team === team && p.role === 'bomber_pilot') || (playerTeam === team && playerRole === 'bomber_pilot');
@@ -1335,16 +1403,14 @@
                     }
                 }
 
-                if (!hit) {
-                    for (let j = bots.length - 1; j >= 0; j--) {
-                        if (p.team !== bots[j].team && p.mesh.position.distanceTo(bots[j].mesh.position) < hitRadius) {
-                            hit = true; bots[j].health -= 17;
-                            if (bots[j].health <= 0) {
-                                triggerExplosion(bots[j].mesh.position); scene.remove(bots[j].mesh); bots.splice(j, 1);
-                                if (p.team === playerTeam) score += 250; 
-                            }
-                            break;
+                for (let j = bots.length - 1; j >= 0; j--) {
+                    if (p.team !== bots[j].team && p.mesh.position.distanceTo(bots[j].mesh.position) < hitRadius) {
+                        hit = true; bots[j].health -= 17;
+                        if (bots[j].health <= 0) {
+                            triggerExplosion(bots[j].mesh.position); scene.remove(bots[j].mesh); bots.splice(j, 1);
+                            if (p.team === playerTeam) score += 250; 
                         }
+                        break;
                     }
                 }
 
@@ -1354,7 +1420,7 @@
                         if (rp.team !== playerTeam && p.mesh.position.distanceTo(rp.mesh.position) < hitRadius) {
                             hit = true;
                             if (db) {
-                                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                                const appId = getAppId();
                                 addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'damage_actions'), { targetId: id, amount: 17, timestamp: Date.now() }).catch(e=>e);
                             }
                             triggerExplosion(rp.mesh.position); score += 100; break;
@@ -1362,7 +1428,7 @@
                     }
                 }
 
-                if (!hit && p.team !== playerTeam) {
+                if (!hit) {
                     for (let j = aiBombers.length - 1; j >= 0; j--) {
                         let bmb = aiBombers[j];
                         if (p.team !== bmb.team && p.mesh.position.distanceTo(bmb.mesh.position) < 100) { 
@@ -1615,17 +1681,35 @@
         async function initFirebase() {
             const statusLabel = document.getElementById('multiplayer-status');
             try {
+                // Pull active config from custom GitHub global or system default
                 const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-                if (!configStr) { statusLabel.innerText = "Multiplayer Offline (No Config)"; return; }
+
+                if (!configStr) { 
+                    statusLabel.innerText = "Multiplayer Offline (Unconfigured)"; 
+                    statusLabel.style.color = "#ffa500";
+                    return; 
+                }
                 const app = initializeApp(JSON.parse(configStr));
                 auth = getAuth(app); db = getFirestore(app);
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-                else await signInAnonymously(auth);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
 
                 onAuthStateChanged(auth, (user) => {
-                    if (user) { userId = user.uid; statusLabel.innerText = "Multiplayer: Online"; statusLabel.style.color = "#0f0"; setupMultiplayerListener(); }
+                    if (user) { 
+                        userId = user.uid; 
+                        statusLabel.innerText = "Multiplayer: Connected"; 
+                        statusLabel.style.color = "#0f0"; 
+                        setupMultiplayerListener(); 
+                    }
                 });
-            } catch (e) { statusLabel.innerText = "Multiplayer Error"; console.warn("Firebase Init Error:", e); }
+            } catch (e) { 
+                statusLabel.innerText = "Multiplayer Error"; 
+                console.warn("Firebase Init Error:", e); 
+            }
         }
 
         function syncMultiplayer() {
@@ -1633,7 +1717,7 @@
             const now = Date.now();
             if (now - lastSyncTime > 250) {
                 lastSyncTime = now;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const appId = getAppId();
                 setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', userId), {
                     username: username, score: score, team: playerTeam, role: playerRole, decal: playerDecalColor,
                     x: jetGroup.position.x, y: jetGroup.position.y, z: jetGroup.position.z,
@@ -1650,7 +1734,7 @@
 
         function setupMultiplayerListener() {
             if (!db || !userId) return;
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const appId = getAppId();
             
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'players'), (snapshot) => {
                 snapshot.docChanges().forEach((change) => {
@@ -1667,7 +1751,7 @@
                             remotePlayers[id] = { mesh: rMesh, targetPos: new THREE.Vector3(), targetQuat: new THREE.Quaternion(), lastUpdate: Date.now(), tier: data.tier, team: data.team, role: data.role, decal: data.decal, username: data.username };
                         }
                         
-                        remotePlayers[id].username = data.username; remotePlayers[id].score = data.score;
+                        remotePlayers[id].username = data.username; remotePlayers[id].score = data.score; remotePlayers[id].team = data.team;
                         remotePlayers[id].targetPos.set(data.x, data.y, data.z);
                         remotePlayers[id].targetQuat.set(data.rx, data.ry, data.rz, data.rw);
                         remotePlayers[id].lastUpdate = Date.now();
