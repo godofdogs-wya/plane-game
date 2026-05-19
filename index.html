@@ -63,7 +63,7 @@
         #crash-screen, #victory-screen { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(200, 0, 0, 0.5); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 50; }
         #victory-screen { background: rgba(0, 50, 200, 0.9); z-index: 60; }
 
-        #multiplayer-status { position: absolute; bottom: 10px; right: 10px; color: rgba(255,255,255,0.5); z-index: 10; font-size: 12px;}
+        #multiplayer-status { position: absolute; bottom: 10px; right: 10px; color: rgba(255,255,255,0.5); z-index: 10; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px #000; }
 
         .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #111; color: white; display: flex; flex-direction: column; justify-content: flex-start; align-items: center; z-index: 100; overflow-y: auto; overflow-x: hidden; padding: 40px 20px; box-sizing: border-box; }
         #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(0, 255, 0, 0.7); font-size: 28px; pointer-events: none; z-index: 10; font-weight: bold; }
@@ -94,12 +94,23 @@
 </head>
 <body>
 
-    <!-- Menus -->
+    <!-- Auth / Menus -->
     <div id="auth-screen" class="overlay">
-        <div style="margin: auto 0; display: flex; flex-direction: column; align-items: center; width: 100%;">
+        <div class="bg-gray-900 bg-opacity-90 p-10 rounded-xl border-2 border-green-500 flex flex-col items-center" style="margin-top: 10vh; max-width: 500px;">
             <h1 class="text-6xl font-bold mb-8 text-green-400 text-center">Fighter Jet Sim</h1>
-            <input type="text" id="username-input" placeholder="Enter Username" class="text-black px-4 py-3 text-2xl rounded mb-6 w-80 max-w-full text-center" autocomplete="off">
-            <button class="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-2xl" onclick="submitAuth()">LOGIN</button>
+            <p class="text-gray-400 mb-6 text-center">Login or Create an Account to lock your username and save stats!</p>
+            
+            <input type="text" id="auth-username" placeholder="Username" class="text-black px-4 py-3 text-xl rounded mb-4 w-full text-center font-bold" autocomplete="off">
+            <input type="password" id="auth-password" placeholder="Password" class="text-black px-4 py-3 text-xl rounded mb-6 w-full text-center font-bold" autocomplete="off">
+            
+            <p id="auth-error" class="text-red-500 font-bold mb-4 h-6 text-center w-full"></p>
+
+            <div class="flex gap-4 mb-4 flex-wrap justify-center w-full">
+                <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg text-xl flex-1" onclick="handleAuth('login')">LOGIN</button>
+                <button class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-8 rounded-lg text-xl flex-1" onclick="handleAuth('signup')">SIGN UP</button>
+            </div>
+            
+            <button class="text-gray-400 hover:text-white underline mt-4" onclick="playOffline()">Play Offline (No Account)</button>
         </div>
     </div>
 
@@ -230,7 +241,8 @@
         <p><b>Q</b> : Decrease Throttle</p>
         <p><b>G</b> : Toggle Landing Gear</p>
         <p><b>C</b> : Toggle Camera POV</p>
-        <p><b>SPACE</b> : Fire Guns / Drop Bomb</p>
+        <p><b>SPACE</b> : Fire Guns</p>
+        <p><b>SHIFT</b> : Drop Bomb</p>
         <p><b>F</b> : Fire Heatseeking Rocket</p>
         <p><b>R</b> : Deploy Flares</p>
         <p><b>W / S</b> : Pitch Up / Down</p>
@@ -265,7 +277,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- GITHUB MULTIPLAYER HELPER ---
         // Placing getAppId at the absolute top of module script to prevent ReferenceErrors during setup
@@ -325,7 +337,7 @@
         let targetThrottle = 0;
         let currentThrottle = 0;
         let speed = 0;
-        let maxSpeedBase = 9.0; 
+        let maxSpeedBase = 7.5; 
         
         let crashed = false;
         let altitude = 0;
@@ -334,7 +346,7 @@
         const RED_BASE_Z = 15000;
 
         // Input state
-        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, s: false, a: false, d: false, Space: false };
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, s: false, a: false, d: false, Space: false, Shift: false };
 
         // Firebase
         let db = null, auth = null, userId = null;
@@ -343,12 +355,12 @@
 
         // --- Utility ---
         function getElevation(x, z) {
-            let elevation = Math.sin(x * 0.0002) * Math.cos(z * 0.0002) * 1200; 
-            elevation += Math.sin(x * 0.001) * Math.cos(z * 0.001) * 200; 
+            let elevation = Math.sin(x * 0.0001) * Math.cos(z * 0.0001) * 800; 
+            elevation += Math.sin(x * 0.0005) * Math.cos(z * 0.0005) * 150; 
             
             // Smooth procedural mountains
-            let mNoise = Math.sin(x * 0.00008 + 1) * Math.cos(z * 0.00008 + 1) * 6000;
-            mNoise += Math.sin(x * 0.0002 + 2) * Math.cos(z * 0.0002 + 2) * 1500;
+            let mNoise = Math.sin(x * 0.00004 + 1) * Math.cos(z * 0.00004 + 1) * 4000;
+            mNoise += Math.sin(x * 0.0001 + 2) * Math.cos(z * 0.0001 + 2) * 800;
             
             if (mNoise > 0) {
                 const distFromAxis = Math.abs(x);
@@ -356,8 +368,8 @@
                 const distFromRed = Math.sqrt(x*x + Math.pow(z - RED_BASE_Z, 2));
                 const baseClearance = Math.min(distFromBlue, distFromRed);
                 
-                let mFactor = Math.min(1, Math.max(0, (baseClearance - 5000) / 3000));
-                mFactor *= Math.min(1, Math.max(0, (distFromAxis - 2000) / 2000)); 
+                let mFactor = Math.min(1, Math.max(0, (baseClearance - 8000) / 4000));
+                mFactor *= Math.min(1, Math.max(0, (distFromAxis - 3000) / 3000)); 
                 
                 elevation += mNoise * mFactor;
             }
@@ -365,30 +377,78 @@
             // Flatten out bases
             const distFromBlue = Math.sqrt(x*x + Math.pow(z - BLUE_BASE_Z, 2));
             const distFromRed = Math.sqrt(x*x + Math.pow(z - RED_BASE_Z, 2));
-            const flattenRadius = 3000;
+            const flattenRadius = 5000;
             if (distFromBlue < flattenRadius) elevation = elevation * (distFromBlue / flattenRadius); 
             if (distFromRed < flattenRadius) elevation = elevation * (distFromRed / flattenRadius); 
 
             return elevation;
         }
 
-        // --- UI Flow ---
-        window.submitAuth = () => {
-            const input = document.getElementById('username-input').value.trim();
-            if (!input) return;
-            username = input;
+        // --- UI Flow & Authentication ---
+        window.handleAuth = async (mode) => {
+            const user = document.getElementById('auth-username').value.trim();
+            const pass = document.getElementById('auth-password').value;
+            const err = document.getElementById('auth-error');
+            
+            if(!user || !pass) { err.innerText = "Enter username and password."; return; }
+            
+            if (!db) {
+                err.innerText = "Multiplayer offline. Please click Play Offline.";
+                return;
+            }
+            
+            err.innerText = "Authenticating...";
+            err.style.color = "#0f0";
+            
+            const appId = getAppId();
+            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'user_accounts', user.toLowerCase());
+            
+            try {
+                const docSnap = await getDoc(userRef);
+                if (mode === 'login') {
+                    if (!docSnap.exists()) { 
+                        err.innerText = "Username not found. Try Sign Up."; 
+                        err.style.color = "#f00";
+                        return; 
+                    }
+                    if (docSnap.data().password !== pass) { 
+                        err.innerText = "Incorrect password."; 
+                        err.style.color = "#f00";
+                        return; 
+                    }
+                    username = docSnap.data().username;
+                    proceedToGarage();
+                } else if (mode === 'signup') {
+                    if (docSnap.exists()) { 
+                        err.innerText = "Username already taken."; 
+                        err.style.color = "#f00";
+                        return; 
+                    }
+                    await setDoc(userRef, { username: user, password: pass });
+                    username = user;
+                    proceedToGarage();
+                }
+            } catch(e) {
+                console.warn(e);
+                err.innerText = "Database error. Check console.";
+                err.style.color = "#f00";
+            }
+        };
+
+        window.playOffline = () => {
+            const user = document.getElementById('auth-username').value.trim();
+            username = user || "Guest_" + Math.floor(Math.random() * 1000);
+            proceedToGarage();
+        };
+
+        function proceedToGarage() {
             document.getElementById('auth-screen').style.display = 'none';
             document.getElementById('garage-screen').style.display = 'flex';
-            
-            // Allow godofdogs to access admin panel globally
             if (username.toLowerCase().replace(/\s/g, '') === 'godofdogs') {
                 document.getElementById('admin-toggle-btn').style.display = 'block';
                 document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'flex');
             }
-
-            // Init Firebase immediately so Garage point updates work
-            if (!db) initFirebase();
-        };
+        }
 
         window.toggleAdminPanel = () => {
             const panel = document.getElementById('admin-panel');
@@ -417,6 +477,14 @@
 
         window.showTeamScreen = () => {
             isMultiplayer = true;
+            
+            const hasConfig = (typeof window !== 'undefined' && window.__firebase_config) || GITHUB_FIREBASE_CONFIG;
+            if (!hasConfig) {
+                const sl = document.getElementById('multiplayer-status');
+                sl.innerText = "MULTIPLAYER OFFLINE: Add Firebase Config in code!"; 
+                sl.style.color = "#ff0000";
+            }
+            
             document.getElementById('mode-screen').style.display = 'none';
             document.getElementById('team-screen').style.display = 'flex';
             document.getElementById('team-balance-error').innerText = "";
@@ -425,7 +493,6 @@
         // Strict Team Balance check (Max difference of 1)
         window.trySelectTeam = (selectedTeam) => {
             if (!isMultiplayer || !db) {
-                // Offline fallback
                 showVehicleScreen(selectedTeam);
                 return;
             }
@@ -433,13 +500,11 @@
             let blueCount = 0;
             let redCount = 0;
 
-            // Count teammates on remote players
             for (let id in remotePlayers) {
                 if (remotePlayers[id].team === 'blue') blueCount++;
                 if (remotePlayers[id].team === 'red') redCount++;
             }
 
-            // Perform dynamic validation
             if (selectedTeam === 'blue' && blueCount > redCount) {
                 document.getElementById('team-balance-error').innerText = "Teams must remain balanced! Join Red Team.";
                 return;
@@ -448,7 +513,6 @@
                 return;
             }
 
-            // Pass validation
             document.getElementById('team-balance-error').innerText = "";
             showVehicleScreen(selectedTeam);
         };
@@ -584,7 +648,6 @@
             for (let k in keys) keys[k] = false;
             jetGroup.visible = true; 
             
-            // Set initial camera instantly so it doesn't swoop from miles away
             let relativeCameraOffset = playerRole === 'bomber_pilot' ? new THREE.Vector3(0, 60, 180) : new THREE.Vector3(0, 18, 50);
             let initLookOffset = new THREE.Vector3(0, 0, -50);
             
@@ -858,19 +921,19 @@
         function createHangar(teamColorHex, zPos) {
             const group = new THREE.Group();
             const wallMat = new THREE.MeshStandardMaterial({ color: teamColorHex, metalness: 0.5, roughness: 0.5 });
-            const wallL = new THREE.Mesh(new THREE.BoxGeometry(5, 60, 200), wallMat); wallL.position.set(-87.5, 30, 0);
-            const wallR = new THREE.Mesh(new THREE.BoxGeometry(5, 60, 200), wallMat); wallR.position.set(87.5, 30, 0);
-            const wallBack = new THREE.Mesh(new THREE.BoxGeometry(180, 60, 5), wallMat); wallBack.position.set(0, 30, zPos < 0 ? -97.5 : 97.5); 
-            const roof = new THREE.Mesh(new THREE.CylinderGeometry(90, 90, 200, 32, 1, true, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x444444, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.8 }));
+            const wallL = new THREE.Mesh(new THREE.BoxGeometry(10, 100, 400), wallMat); wallL.position.set(-145, 50, 0);
+            const wallR = new THREE.Mesh(new THREE.BoxGeometry(10, 100, 400), wallMat); wallR.position.set(145, 50, 0);
+            const wallBack = new THREE.Mesh(new THREE.BoxGeometry(300, 100, 10), wallMat); wallBack.position.set(0, 50, zPos < 0 ? -195 : 195); 
+            const roof = new THREE.Mesh(new THREE.CylinderGeometry(150, 150, 400, 32, 1, true, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x444444, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.8 }));
             roof.rotation.x = -Math.PI / 2; roof.position.set(0, 60, 0);
             group.add(wallL, wallR, wallBack, roof); group.position.set(0, 0, zPos);
             
-            const zone = new THREE.Mesh(new THREE.PlaneGeometry(160, 180), new THREE.MeshBasicMaterial({ color: teamColorHex, transparent: true, opacity: 0.3, depthWrite: false }));
+            const zone = new THREE.Mesh(new THREE.PlaneGeometry(280, 380), new THREE.MeshBasicMaterial({ color: teamColorHex, transparent: true, opacity: 0.3, depthWrite: false }));
             zone.rotation.x = -Math.PI / 2;
             zone.position.set(0, 2.0, 0);
             group.add(zone);
 
-            const pointLight = new THREE.PointLight(teamColorHex, 2, 800); pointLight.position.set(0, 80, 0); group.add(pointLight);
+            const pointLight = new THREE.PointLight(teamColorHex, 3, 1500); pointLight.position.set(0, 120, 0); group.add(pointLight);
             scene.add(group);
             return group;
         }
@@ -888,7 +951,7 @@
 
         function createEnvironment() {
             // Procedural Terrain 
-            const terrainGeo = new THREE.PlaneGeometry(100000, 100000, 400, 400);
+            const terrainGeo = new THREE.PlaneGeometry(150000, 150000, 500, 500);
             const pos = terrainGeo.attributes.position;
             for (let i = 0; i < pos.count; i++) {
                 const x = pos.getX(i); const z = pos.getY(i); 
@@ -899,14 +962,14 @@
             terrain.rotation.x = -Math.PI / 2; terrain.receiveShadow = true; scene.add(terrain);
 
             const waterMat = new THREE.MeshStandardMaterial({ color: 0x3388ff, transparent: true, opacity: 0.8, roughness: 0.1, metalness: 0.2, depthWrite: false });
-            const water = new THREE.Mesh(new THREE.PlaneGeometry(100000, 100000), waterMat); 
+            const water = new THREE.Mesh(new THREE.PlaneGeometry(150000, 150000), waterMat); 
             water.rotation.x = -Math.PI / 2; water.position.set(0, -150, 0); scene.add(water);
 
             const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3b22 }); const leavesMat = new THREE.MeshStandardMaterial({ color: 0x1e3a12 }); 
             const forestCenters = [];
-            for(let i=0; i<40; i++) forestCenters.push({ x: (Math.random() - 0.5) * 80000, z: (Math.random() - 0.5) * 80000, radius: Math.random() * 3000 + 1000 });
+            for(let i=0; i<60; i++) forestCenters.push({ x: (Math.random() - 0.5) * 120000, z: (Math.random() - 0.5) * 120000, radius: Math.random() * 4000 + 1000 });
 
-            for(let i=0; i<2000; i++) {
+            for(let i=0; i<3000; i++) {
                 const fc = forestCenters[Math.floor(Math.random() * forestCenters.length)];
                 const r = Math.random() * fc.radius;
                 const theta = Math.random() * Math.PI * 2;
@@ -914,7 +977,7 @@
                 const tx = Math.round((fc.x + r * Math.cos(theta)) / 250) * 250;
                 const tz = Math.round((fc.z + r * Math.sin(theta)) / 250) * 250;
                 
-                if (Math.abs(tx) < 1500 && Math.abs(tz) < 18000) continue; 
+                if (Math.abs(tx) < 2000 && Math.abs(tz) > 15000) continue; // Runways clear
                 const elev = getElevation(tx, tz);
                 if (elev < -100) continue; 
                 
@@ -924,20 +987,24 @@
                 const leaves2 = new THREE.Mesh(new THREE.ConeGeometry(12, 30, 8), leavesMat); leaves2.position.y = 44;
                 tree.add(trunk, leaves1, leaves2);
                 
-                tree.position.set(tx, elev - 10, tz); 
+                tree.position.set(tx, elev, tz); 
                 tree.scale.setScalar(Math.random() * 1.5 + 0.8); scene.add(tree);
             }
 
-            const runway = new THREE.Mesh(new THREE.PlaneGeometry(160, 36000), new THREE.MeshStandardMaterial({ color: 0x222222, polygonOffset: true, polygonOffsetFactor: -1 }));
-            runway.rotation.x = -Math.PI / 2; runway.position.set(0, 1.0, 0); runway.receiveShadow = true; scene.add(runway);
+            const runwayMat = new THREE.MeshStandardMaterial({ color: 0x222222, polygonOffset: true, polygonOffsetFactor: -1 });
+            const runwayBlue = new THREE.Mesh(new THREE.PlaneGeometry(240, 6000), runwayMat);
+            runwayBlue.rotation.x = -Math.PI / 2; runwayBlue.position.set(0, 1.0, BLUE_BASE_Z + 3000); runwayBlue.receiveShadow = true; scene.add(runwayBlue);
+
+            const runwayRed = new THREE.Mesh(new THREE.PlaneGeometry(240, 6000), runwayMat);
+            runwayRed.rotation.x = -Math.PI / 2; runwayRed.position.set(0, 1.0, RED_BASE_Z - 3000); runwayRed.receiveShadow = true; scene.add(runwayRed);
 
             createHangar(0x0000ff, BLUE_BASE_Z); 
             redHangarGroup = createHangar(0xff0000, RED_BASE_Z);  
 
-            createAA('blue', 800, BLUE_BASE_Z + 1200); createAA('blue', -800, BLUE_BASE_Z + 1200);
-            createAA('blue', 1200, BLUE_BASE_Z - 400); createAA('blue', -1200, BLUE_BASE_Z - 400);
-            createAA('red', 800, RED_BASE_Z - 1200); createAA('red', -800, RED_BASE_Z - 1200);
-            createAA('red', 1200, RED_BASE_Z + 400); createAA('red', -1200, RED_BASE_Z + 400);
+            createAA('blue', 1200, BLUE_BASE_Z + 1800); createAA('blue', -1200, BLUE_BASE_Z + 1800);
+            createAA('blue', 1800, BLUE_BASE_Z - 600); createAA('blue', -1800, BLUE_BASE_Z - 600);
+            createAA('red', 1200, RED_BASE_Z - 1800); createAA('red', -1200, RED_BASE_Z - 1800);
+            createAA('red', 1800, RED_BASE_Z + 600); createAA('red', -1800, RED_BASE_Z + 600);
         }
 
         // --- Inputs & Controls ---
@@ -951,6 +1018,8 @@
                 if (key === 'g') toggleGear();
                 if (key === 'c') firstPerson = !firstPerson;
                 if (e.code === 'Space') keys['Space'] = true;
+                if (e.key === 'Shift') keys['Shift'] = true;
+                if (e.key === 'Shift') dropBomb();
                 if (key === 'f') fireRocket();
                 if (key === 'r') deployFlares();
 
@@ -961,6 +1030,7 @@
                 if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
                 const key = e.key.toLowerCase();
                 if (e.code === 'Space') keys['Space'] = false;
+                if (e.key === 'Shift') keys['Shift'] = false;
                 if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
                 if (keys.hasOwnProperty(key)) keys[key] = false;
             });
@@ -1013,30 +1083,29 @@
             });
         }
 
-        function shoot() {
-            if (playerRole === 'bomber_pilot') {
-                if (!hasBomb) return;
-                hasBomb = false;
-                document.getElementById('bomb-status').innerText = 'BOMB: DROPPED';
-                document.getElementById('bomb-status').style.color = '#777';
-                
-                if (isMultiplayer && db) {
-                    const appId = getAppId();
-                    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'game_events'), {
-                        type: 'bomb', team: playerTeam, sender: userId,
-                        x: jetGroup.position.x, y: jetGroup.position.y, z: jetGroup.position.z,
-                        qx: jetGroup.quaternion.x, qy: jetGroup.quaternion.y, qz: jetGroup.quaternion.z, qw: jetGroup.quaternion.w,
-                        speed: speed, timestamp: Date.now()
-                    }).catch(e=>e);
-                } 
-                spawnBombLocally(jetGroup.position, jetGroup.quaternion, playerTeam, speed);
-                return;
-            }
+        function dropBomb() {
+            if (playerRole !== 'bomber_pilot') return;
+            if (!hasBomb) return;
+            hasBomb = false;
+            document.getElementById('bomb-status').innerText = 'BOMB: DROPPED';
+            document.getElementById('bomb-status').style.color = '#777';
+            
+            if (isMultiplayer && db) {
+                const appId = getAppId();
+                addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'game_events'), {
+                    type: 'bomb', team: playerTeam, sender: userId,
+                    x: jetGroup.position.x, y: jetGroup.position.y, z: jetGroup.position.z,
+                    qx: jetGroup.quaternion.x, qy: jetGroup.quaternion.y, qz: jetGroup.quaternion.z, qw: jetGroup.quaternion.w,
+                    speed: speed, timestamp: Date.now()
+                }).catch(e=>e);
+            } 
+            spawnBombLocally(jetGroup.position, jetGroup.quaternion, playerTeam, speed);
+        }
 
-            const isAdmin = (currentTier === 4 || currentTier === 5);
+        function shoot() {
             const isAdminGunner = playerRole === 'plane' && currentTier === 5;
             const cooldown = isAdminGunner ? 10 : 100;
-            const bulletSpeed = isAdminGunner ? 250 : 40; 
+            const bulletSpeed = isAdminGunner ? 350 : 200; 
 
             const now = Date.now();
             if(now - lastShootTime < cooldown) return; 
@@ -1059,13 +1128,15 @@
                 laser.position.add(new THREE.Vector3(offsetX, 1.0, offsetZ).applyQuaternion(jetGroup.quaternion));
                 
                 scene.add(laser);
-                projectiles.push({ mesh: laser, type: 'laser', life: 120, team: playerTeam, target: lockedTarget, velocity: velocity });
+                projectiles.push({ mesh: laser, type: 'laser', life: 150, team: playerTeam, target: null, velocity: velocity });
             };
 
             if (playerRole === 'plane' && currentTier === 2) {
                 spawnLaser(-2.5); spawnLaser(2.5);
             } else if (playerRole === 'plane' && currentTier === 5) {
                 spawnLaser(-4.0); spawnLaser(4.0); 
+            } else if (playerRole === 'bomber_pilot') {
+                spawnLaser(-5.0); spawnLaser(5.0); 
             } else {
                 spawnLaser(0);
             }
@@ -1113,7 +1184,6 @@
             // Remove fighter bots completely if at least two players are in the game
             const playerCount = Object.keys(remotePlayers).length + 1;
             if (playerCount >= 2) {
-                // Clear any leftover bots
                 for (let i = bots.length - 1; i >= 0; i--) {
                     scene.remove(bots[i].mesh);
                 }
@@ -1127,9 +1197,9 @@
             
             let slot = botSpawnSlots[botTeam];
             botSpawnSlots[botTeam] = (botSpawnSlots[botTeam] + 1) % 5;
-            let offsetX = (slot - 2) * 25; 
+            let offsetX = (slot - 2) * 35; 
             
-            const spawnZ = botTeam === 'blue' ? BLUE_BASE_Z + 150 : RED_BASE_Z - 150;
+            const spawnZ = botTeam === 'blue' ? BLUE_BASE_Z + 1000 : RED_BASE_Z - 1000;
             botMesh.position.set(offsetX, GROUND_Y, spawnZ);
             botMesh.rotation.y = botTeam === 'blue' ? 0 : Math.PI; 
             scene.add(botMesh);
@@ -1164,15 +1234,11 @@
         function updateProjectilesAndBots() {
             const playerCount = Object.keys(remotePlayers).length + 1;
             
-            // Clean out regular bots if 2 or more players are active
             if (playerCount >= 2 && bots.length > 0) {
-                for (let i = bots.length - 1; i >= 0; i--) {
-                    scene.remove(bots[i].mesh);
-                }
+                for (let i = bots.length - 1; i >= 0; i--) { scene.remove(bots[i].mesh); }
                 bots = [];
             }
 
-            // Only spawn regular bots in singleplayer or solitary multiplayer
             if (playerCount < 2 && isMultiplayer && bots.length < 15 && Math.random() < 0.1) {
                 spawnBot(); 
             }
@@ -1196,7 +1262,6 @@
                 }
             }
 
-            // Bombers spawn independently of the regular fighter bots
             if (isMultiplayer) {
                 ['red', 'blue'].forEach(team => {
                     let playerBomberExists = Object.values(remotePlayers).some(p => p.team === team && p.role === 'bomber_pilot') || (playerTeam === team && playerRole === 'bomber_pilot');
@@ -1253,7 +1318,7 @@
                         laser.position.copy(aa.gun.position).add(aa.mesh.position);
                         laser.lookAt(closest.position);
                         scene.add(laser);
-                        projectiles.push({ mesh: laser, type: 'laser', life: 100, team: aa.team, target: closest, velocity: new THREE.Vector3(0,0,-80).applyQuaternion(laser.quaternion) });
+                        projectiles.push({ mesh: laser, type: 'laser', life: 100, team: aa.team, target: null, velocity: new THREE.Vector3(0,0,-80).applyQuaternion(laser.quaternion) });
                     }
                 }
             });
@@ -1269,7 +1334,7 @@
                 if (b.mesh.position.y <= groundY) {
                     triggerExplosion(b.mesh.position, 20); 
                     const enemyBaseZ = b.team === 'blue' ? RED_BASE_Z : BLUE_BASE_Z;
-                    if (Math.abs(b.mesh.position.z - enemyBaseZ) < 1500 && Math.abs(b.mesh.position.x) < 1500) {
+                    if (Math.abs(b.mesh.position.z - enemyBaseZ) < 2500 && Math.abs(b.mesh.position.x) < 2500) {
                         triggerVictory(b.team);
                     }
                     scene.remove(b.mesh); bombs.splice(i, 1);
@@ -1281,10 +1346,10 @@
                 const bot = bots[i]; 
 
                 if (bot.takingOff) {
-                    bot.mesh.translateZ(-4.0);
+                    bot.mesh.translateZ(-6.0);
                     const distFromHangar = Math.abs(bot.mesh.position.z - (bot.team === 'blue' ? BLUE_BASE_Z : RED_BASE_Z));
                     if (distFromHangar > 1000) {
-                        bot.mesh.position.y += 2.5; 
+                        bot.mesh.position.y += 3.5; 
                         if (bot.mesh.position.y > 1000) bot.takingOff = false;
                     }
                     continue; 
@@ -1344,7 +1409,7 @@
                         laser.lookAt(closestEnemy.position);
                         laser.position.add(new THREE.Vector3(0,0,-20).applyQuaternion(bot.mesh.quaternion));
                         scene.add(laser);
-                        projectiles.push({ mesh: laser, type: wType, life: isRocket ? 300 : 100, team: bot.team, target: closestEnemy, velocity: vel });
+                        projectiles.push({ mesh: laser, type: wType, life: isRocket ? 300 : 100, team: bot.team, target: isRocket ? closestEnemy : null, velocity: vel });
                     }
                 } else {
                     if (bot.mesh.position.distanceTo(bot.targetPos) < 1000) {
@@ -1403,14 +1468,16 @@
                     }
                 }
 
-                for (let j = bots.length - 1; j >= 0; j--) {
-                    if (p.team !== bots[j].team && p.mesh.position.distanceTo(bots[j].mesh.position) < hitRadius) {
-                        hit = true; bots[j].health -= 17;
-                        if (bots[j].health <= 0) {
-                            triggerExplosion(bots[j].mesh.position); scene.remove(bots[j].mesh); bots.splice(j, 1);
-                            if (p.team === playerTeam) score += 250; 
+                if (!hit) {
+                    for (let j = bots.length - 1; j >= 0; j--) {
+                        if (p.team !== bots[j].team && p.mesh.position.distanceTo(bots[j].mesh.position) < hitRadius) {
+                            hit = true; bots[j].health -= 17;
+                            if (bots[j].health <= 0) {
+                                triggerExplosion(bots[j].mesh.position); scene.remove(bots[j].mesh); bots.splice(j, 1);
+                                if (p.team === playerTeam) score += 250; 
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
 
@@ -1428,7 +1495,7 @@
                     }
                 }
 
-                if (!hit) {
+                if (!hit && p.team !== playerTeam) {
                     for (let j = aiBombers.length - 1; j >= 0; j--) {
                         let bmb = aiBombers[j];
                         if (p.team !== bmb.team && p.mesh.position.distanceTo(bmb.mesh.position) < 100) { 
@@ -1682,7 +1749,9 @@
             const statusLabel = document.getElementById('multiplayer-status');
             try {
                 // Pull active config from custom GitHub global or system default
-                const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+                const configStr = (typeof GITHUB_FIREBASE_CONFIG !== 'undefined' && GITHUB_FIREBASE_CONFIG) 
+                    ? JSON.stringify(GITHUB_FIREBASE_CONFIG) 
+                    : (typeof __firebase_config !== 'undefined' ? __firebase_config : null);
 
                 if (!configStr) { 
                     statusLabel.innerText = "Multiplayer Offline (Unconfigured)"; 
